@@ -17,6 +17,7 @@ export interface Database {
           confirmed_date: string | null
           confirmed_location: string | null
           treasurer: string | null
+          roulette_title: string
           host_token: string
           created_at: string
           updated_at: string
@@ -28,6 +29,7 @@ export interface Database {
           confirmed_date?: string | null
           confirmed_location?: string | null
           treasurer?: string | null
+          roulette_title?: string
           host_token?: string
           created_at?: string
           updated_at?: string
@@ -39,6 +41,7 @@ export interface Database {
           confirmed_date?: string | null
           confirmed_location?: string | null
           treasurer?: string | null
+          roulette_title?: string
           host_token?: string
           created_at?: string
           updated_at?: string

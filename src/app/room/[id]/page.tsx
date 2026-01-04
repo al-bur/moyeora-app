@@ -14,6 +14,8 @@ import {
   Check,
   Loader2,
   Navigation,
+  Pencil,
+  X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatDate, countVotes, calculateMidpoint } from '@/lib/utils'
@@ -33,6 +35,11 @@ export default function RoomPage() {
   const [showQR, setShowQR] = useState(false)
   const [showRoulette, setShowRoulette] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [locationMode, setLocationMode] = useState<'gps' | 'manual' | null>(null)
+  const [manualLocation, setManualLocation] = useState('')
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [isEditingRouletteTitle, setIsEditingRouletteTitle] = useState(false)
+  const [rouletteTitle, setRouletteTitle] = useState('')
 
   const isHost = typeof window !== 'undefined' &&
     localStorage.getItem(`moyeora_host_${roomId}`) === room?.host_token
@@ -142,8 +149,8 @@ export default function RoomPage() {
     }
   }
 
-  // 위치 등록
-  const handleLocation = async () => {
+  // GPS 위치 등록
+  const handleGPSLocation = async () => {
     if (!currentParticipant) return
 
     if (!navigator.geolocation) {
@@ -151,6 +158,7 @@ export default function RoomPage() {
       return
     }
 
+    setLocationLoading(true)
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords
@@ -166,15 +174,106 @@ export default function RoomPage() {
             .eq('id', currentParticipant.id)
 
           loadData()
+          setLocationMode(null)
         } catch (error) {
           console.error('Error setting location:', error)
+        } finally {
+          setLocationLoading(false)
         }
       },
       (error) => {
         console.error('Error getting location:', error)
         alert('위치를 가져올 수 없습니다.')
+        setLocationLoading(false)
       }
     )
+  }
+
+  // 직접 입력 위치 등록 (Nominatim 지오코딩 사용)
+  const handleManualLocation = async () => {
+    if (!currentParticipant || !manualLocation.trim()) return
+
+    setLocationLoading(true)
+    try {
+      // Nominatim API로 주소를 좌표로 변환
+      const query = encodeURIComponent(manualLocation.trim() + ' 대한민국')
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`,
+        { headers: { 'Accept-Language': 'ko' } }
+      )
+      const results = await response.json()
+
+      if (results.length > 0) {
+        const { lat, lon, display_name } = results[0]
+        await supabase
+          .from('moyeora_participants')
+          .update({
+            location_lat: parseFloat(lat),
+            location_lng: parseFloat(lon),
+            location_name: manualLocation.trim(),
+          })
+          .eq('id', currentParticipant.id)
+      } else {
+        // 좌표를 찾지 못해도 이름만 저장 (중간지점 계산에서 제외됨)
+        await supabase
+          .from('moyeora_participants')
+          .update({
+            location_name: manualLocation.trim(),
+          })
+          .eq('id', currentParticipant.id)
+        alert('정확한 좌표를 찾지 못했습니다. 중간지점 계산에서 제외될 수 있어요.')
+      }
+
+      loadData()
+      setLocationMode(null)
+      setManualLocation('')
+    } catch (error) {
+      console.error('Error setting manual location:', error)
+      alert('위치 등록에 실패했습니다.')
+    } finally {
+      setLocationLoading(false)
+    }
+  }
+
+  // 위치 삭제
+  const handleClearLocation = async () => {
+    if (!currentParticipant) return
+
+    try {
+      await supabase
+        .from('moyeora_participants')
+        .update({
+          location_lat: null,
+          location_lng: null,
+          location_name: null,
+        })
+        .eq('id', currentParticipant.id)
+
+      loadData()
+    } catch (error) {
+      console.error('Error clearing location:', error)
+    }
+  }
+
+  // 룰렛 제목 수정
+  const handleUpdateRouletteTitle = async () => {
+    if (!rouletteTitle.trim()) {
+      setRouletteTitle(room?.roulette_title || '누가 쏴?')
+      setIsEditingRouletteTitle(false)
+      return
+    }
+
+    try {
+      await supabase
+        .from('moyeora_rooms')
+        .update({ roulette_title: rouletteTitle.trim() })
+        .eq('id', roomId)
+
+      loadData()
+      setIsEditingRouletteTitle(false)
+    } catch (error) {
+      console.error('Error updating roulette title:', error)
+    }
   }
 
   // 공유
@@ -342,20 +441,104 @@ export default function RoomPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {currentParticipant.location_lat ? (
-              <div className="flex items-center gap-2 text-sm text-green-600">
-                <Check className="w-4 h-4" />
-                위치가 등록되었습니다
+            {/* 위치 등록 완료 상태 */}
+            {(currentParticipant.location_lat || currentParticipant.location_name) ? (
+              <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-700">
+                    {currentParticipant.location_name || '위치 등록됨'}
+                  </span>
+                </div>
+                <button
+                  onClick={handleClearLocation}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : locationMode === null ? (
+              /* 위치 선택 모드 버튼 */
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 gap-2"
+                  onClick={() => setLocationMode('gps')}
+                >
+                  <Navigation className="w-4 h-4" />
+                  현재 위치
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 gap-2"
+                  onClick={() => setLocationMode('manual')}
+                >
+                  <Pencil className="w-4 h-4" />
+                  직접 입력
+                </Button>
+              </div>
+            ) : locationMode === 'gps' ? (
+              /* GPS 위치 확인 */
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">현재 위치를 사용하시겠습니까?</p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setLocationMode(null)}
+                    disabled={locationLoading}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    className="flex-1 gap-2"
+                    onClick={handleGPSLocation}
+                    disabled={locationLoading}
+                  >
+                    {locationLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Navigation className="w-4 h-4" />
+                    )}
+                    확인
+                  </Button>
+                </div>
               </div>
             ) : (
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={handleLocation}
-              >
-                <Navigation className="w-4 h-4" />
-                내 위치 등록하기
-              </Button>
+              /* 직접 입력 */
+              <div className="space-y-3">
+                <Input
+                  placeholder="예: 강남역, 홍대입구역, 서울역..."
+                  value={manualLocation}
+                  onChange={(e) => setManualLocation(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleManualLocation()}
+                  className="h-12"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setLocationMode(null)
+                      setManualLocation('')
+                    }}
+                    disabled={locationLoading}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={handleManualLocation}
+                    disabled={!manualLocation.trim() || locationLoading}
+                  >
+                    {locationLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      '등록'
+                    )}
+                  </Button>
+                </div>
+              </div>
             )}
 
             {midpoint && (
@@ -385,7 +568,37 @@ export default function RoomPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
-              💰 누가 쏴?
+              💰{' '}
+              {isEditingRouletteTitle ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <Input
+                    value={rouletteTitle}
+                    onChange={(e) => setRouletteTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleUpdateRouletteTitle()
+                      if (e.key === 'Escape') {
+                        setRouletteTitle(room?.roulette_title || '누가 쏴?')
+                        setIsEditingRouletteTitle(false)
+                      }
+                    }}
+                    onBlur={handleUpdateRouletteTitle}
+                    autoFocus
+                    className="h-8 text-base font-semibold"
+                    placeholder="제목 입력..."
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setRouletteTitle(room?.roulette_title || '누가 쏴?')
+                    setIsEditingRouletteTitle(true)
+                  }}
+                  className="flex items-center gap-1 hover:text-primary transition-colors"
+                >
+                  <span>{room?.roulette_title || '누가 쏴?'}</span>
+                  <Pencil className="w-3 h-3 opacity-50" />
+                </button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
