@@ -508,7 +508,7 @@ export default function RoomPage() {
               /* 직접 입력 */
               <div className="space-y-3">
                 <Input
-                  placeholder="예: 강남역, 홍대입구역, 서울역..."
+                  placeholder="출발지 근처역 (예: 강남역, 홍대입구)"
                   value={manualLocation}
                   onChange={(e) => setManualLocation(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleManualLocation()}
