@@ -1,15 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, CalendarDays, X, Zap } from 'lucide-react'
+import { ArrowLeft, CalendarDays, X, Sparkles } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval, nextSaturday, nextSunday, isWeekend } from 'date-fns'
+import { format, addDays, startOfWeek, eachDayOfInterval, nextSaturday, nextSunday, isWeekend, addWeeks } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import type { DateRange } from 'react-day-picker'
 
@@ -18,16 +17,14 @@ export default function NewRoomPage() {
   const [name, setName] = useState('')
   const [selectedDates, setSelectedDates] = useState<Date[]>([])
   const [loading, setLoading] = useState(false)
-  const [selectionMode, setSelectionMode] = useState<'single' | 'range'>('single')
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
+  const [isDragging, setIsDragging] = useState(false)
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // 단일 날짜 선택
-  const handleDateSelect = (date: Date | undefined) => {
-    if (!date) return
-
+  // 날짜 토글 (탭으로 개별 선택/해제)
+  const toggleDate = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd')
     const exists = selectedDates.some(d => format(d, 'yyyy-MM-dd') === dateStr)
 
@@ -38,46 +35,49 @@ export default function NewRoomPage() {
     }
   }
 
-  // 범위 선택 (react-day-picker v9 시그니처)
+  // 범위 선택 핸들러 (드래그용)
   const handleRangeSelect = (
     range: DateRange | undefined,
-    _triggerDate: Date,
+    triggerDate: Date,
   ) => {
-    console.log('Range selected:', range) // 디버깅용
-
     if (!range) {
       setDateRange(undefined)
+      setIsDragging(false)
       return
     }
 
     setDateRange(range)
 
-    // from과 to가 모두 있고, 서로 다른 날짜일 때만 추가
+    // 첫 번째 클릭 (드래그 시작)
+    if (range.from && (!range.to || format(range.from, 'yyyy-MM-dd') === format(range.to, 'yyyy-MM-dd'))) {
+      setIsDragging(true)
+      return
+    }
+
+    // 두 번째 클릭 (드래그 완료) - 범위 추가
     if (range.from && range.to) {
       const fromStr = format(range.from, 'yyyy-MM-dd')
       const toStr = format(range.to, 'yyyy-MM-dd')
 
-      // 같은 날짜면 아직 범위 선택 중 (첫 번째 클릭)
-      if (fromStr === toStr) {
-        return
+      if (fromStr !== toStr) {
+        const start = range.from < range.to ? range.from : range.to
+        const end = range.from < range.to ? range.to : range.from
+        const daysInRange = eachDayOfInterval({ start, end })
+        const newDates = daysInRange.filter(d => d >= today)
+
+        const existingDateStrs = new Set(selectedDates.map(d => format(d, 'yyyy-MM-dd')))
+        const uniqueNewDates = newDates.filter(d => !existingDateStrs.has(format(d, 'yyyy-MM-dd')))
+
+        if (uniqueNewDates.length > 0) {
+          setSelectedDates(prev => [...prev, ...uniqueNewDates])
+        }
+
+        // 범위 초기화
+        setTimeout(() => {
+          setDateRange(undefined)
+          setIsDragging(false)
+        }, 200)
       }
-
-      // 범위 내 모든 날짜 가져오기
-      const start = range.from < range.to ? range.from : range.to
-      const end = range.from < range.to ? range.to : range.from
-      const daysInRange = eachDayOfInterval({ start, end })
-      const newDates = daysInRange.filter(d => d >= today)
-
-      // 기존 선택에 추가 (중복 제거)
-      const existingDateStrs = new Set(selectedDates.map(d => format(d, 'yyyy-MM-dd')))
-      const uniqueNewDates = newDates.filter(d => !existingDateStrs.has(format(d, 'yyyy-MM-dd')))
-
-      if (uniqueNewDates.length > 0) {
-        setSelectedDates(prev => [...prev, ...uniqueNewDates])
-      }
-
-      // 약간의 딜레이 후 범위 초기화 (시각적 피드백을 위해)
-      setTimeout(() => setDateRange(undefined), 300)
     }
   }
 
@@ -87,7 +87,14 @@ export default function NewRoomPage() {
     ))
   }
 
-  // 빠른 선택 기능들
+  // 빠른 선택 기능들 (확장)
+  const quickSelectThisWeek = () => {
+    const weekStart = startOfWeek(today, { weekStartsOn: 1 })
+    const weekEnd = addDays(weekStart, 6)
+    const days = eachDayOfInterval({ start: today, end: weekEnd })
+    addQuickDates(days)
+  }
+
   const quickSelectThisWeekend = () => {
     const sat = nextSaturday(today)
     const sun = nextSunday(today)
@@ -102,11 +109,24 @@ export default function NewRoomPage() {
     addQuickDates(weekDays)
   }
 
-  const quickSelectWeekdaysNextWeek = () => {
+  const quickSelectNextWeekdays = () => {
     const nextWeekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), 7)
     const nextWeekEnd = addDays(nextWeekStart, 4) // 월~금
     const weekDays = eachDayOfInterval({ start: nextWeekStart, end: nextWeekEnd })
     addQuickDates(weekDays)
+  }
+
+  const quickSelectNextWeekend = () => {
+    const nextWeekStart = addDays(startOfWeek(today, { weekStartsOn: 1 }), 7)
+    const sat = addDays(nextWeekStart, 5) // 토요일
+    const sun = addDays(nextWeekStart, 6) // 일요일
+    addQuickDates([sat, sun])
+  }
+
+  const quickSelectTwoWeeks = () => {
+    const twoWeeksEnd = addWeeks(today, 2)
+    const days = eachDayOfInterval({ start: today, end: twoWeeksEnd })
+    addQuickDates(days)
   }
 
   const addQuickDates = (dates: Date[]) => {
@@ -117,6 +137,8 @@ export default function NewRoomPage() {
 
   const clearAllDates = () => {
     setSelectedDates([])
+    setDateRange(undefined)
+    setIsDragging(false)
   }
 
   const handleCreate = async () => {
@@ -139,9 +161,7 @@ export default function NewRoomPage() {
 
       if (error) throw error
 
-      // 호스트 토큰을 localStorage에 저장
       localStorage.setItem(`moyeora_host_${data.id}`, data.host_token)
-
       router.push(`/room/${data.id}`)
     } catch (error) {
       console.error('Error creating room:', error)
@@ -163,7 +183,7 @@ export default function NewRoomPage() {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto p-4 space-y-6">
+      <main className="max-w-lg mx-auto p-4 space-y-5">
         {/* 약속 이름 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-gray-700">약속 이름</label>
@@ -177,146 +197,131 @@ export default function NewRoomPage() {
 
         {/* 날짜 선택 */}
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <CalendarDays className="w-4 h-4" />
               후보 날짜 선택
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* 빠른 선택 버튼들 */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Zap className="w-4 h-4" />
-                <span>빠른 선택</span>
+            {/* 빠른 선택 버튼들 - 강화된 UI */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span className="text-sm font-medium text-gray-700">빠른 선택</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={quickSelectThisWeekend}
-                  className="text-xs"
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
                 >
                   이번 주말
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={quickSelectWeekdaysNextWeek}
-                  className="text-xs"
+                  onClick={quickSelectNextWeekdays}
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
                 >
                   다음주 평일
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={quickSelectNextWeekend}
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                >
+                  다음주 주말
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={quickSelectThisWeek}
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                >
+                  이번주 전체
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={quickSelectNextWeek}
-                  className="text-xs"
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
                 >
                   다음주 전체
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={quickSelectTwoWeeks}
+                  className="h-10 text-sm font-medium hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                >
+                  2주간
                 </Button>
               </div>
             </div>
 
-            {/* 선택 모드 토글 */}
-            <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
-              <button
-                onClick={() => setSelectionMode('single')}
-                className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                  selectionMode === 'single'
-                    ? 'bg-white shadow text-primary'
-                    : 'text-gray-600'
-                }`}
-              >
-                하나씩 선택
-              </button>
-              <button
-                onClick={() => setSelectionMode('range')}
-                className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                  selectionMode === 'range'
-                    ? 'bg-white shadow text-primary'
-                    : 'text-gray-600'
-                }`}
-              >
-                범위로 선택
-              </button>
-            </div>
-
             {/* 선택된 날짜들 */}
             {selectedDates.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2 p-3 bg-indigo-50/50 rounded-lg">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm font-medium text-indigo-900">
                     선택된 날짜 ({selectedDates.length}개)
                   </span>
                   <button
                     onClick={clearAllDates}
-                    className="text-xs text-red-500 hover:underline"
+                    className="text-xs text-red-500 hover:text-red-700 font-medium"
                   >
                     전체 삭제
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {selectedDates
                     .sort((a, b) => a.getTime() - b.getTime())
                     .map((date) => (
-                      <Badge
+                      <button
                         key={format(date, 'yyyy-MM-dd')}
-                        variant="secondary"
-                        className="px-3 py-1.5 text-sm gap-1"
+                        onClick={() => removeDate(date)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-indigo-200 rounded-full text-sm text-indigo-700 hover:bg-red-50 hover:border-red-300 hover:text-red-600 transition-colors group"
                       >
                         {format(date, 'M/d (EEE)', { locale: ko })}
-                        <button onClick={() => removeDate(date)}>
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
+                        <X className="w-3 h-3 opacity-50 group-hover:opacity-100" />
+                      </button>
                     ))}
                 </div>
               </div>
             )}
 
-            {/* 캘린더 - 단일 선택 모드 */}
-            {selectionMode === 'single' && (
-              <Calendar
-                mode="single"
-                selected={undefined}
-                onSelect={(date: Date | undefined) => handleDateSelect(date)}
-                modifiers={{
-                  alreadySelected: selectedDates,
-                }}
-                modifiersClassNames={{
-                  alreadySelected: 'bg-primary text-primary-foreground',
-                }}
-                disabled={{ before: today }}
-                className="rounded-md border mx-auto"
-              />
-            )}
-
-            {/* 캘린더 - 범위 선택 모드 */}
-            {selectionMode === 'range' && (
-              <Calendar
-                mode="range"
-                selected={dateRange}
-                onSelect={(range, triggerDate) => {
-                  if (triggerDate) {
-                    handleRangeSelect(range, triggerDate)
+            {/* 단일 캘린더 (탭 토글 + 드래그 범위) */}
+            <Calendar
+              mode="range"
+              selected={dateRange}
+              onSelect={(range, triggerDate) => {
+                if (triggerDate) {
+                  // 드래그 중이 아닐 때 탭은 토글로 동작
+                  if (!isDragging && !range?.to) {
+                    toggleDate(triggerDate)
+                    return
                   }
-                }}
-                modifiers={{
-                  alreadySelected: selectedDates,
-                }}
-                modifiersClassNames={{
-                  alreadySelected: 'bg-primary/50 text-primary-foreground',
-                }}
-                disabled={{ before: today }}
-                className="rounded-md border mx-auto"
-              />
-            )}
+                  handleRangeSelect(range, triggerDate)
+                }
+              }}
+              modifiers={{
+                alreadySelected: selectedDates,
+              }}
+              modifiersClassNames={{
+                alreadySelected: 'bg-primary text-primary-foreground rounded-md',
+              }}
+              disabled={{ before: today }}
+              className="rounded-lg border mx-auto"
+            />
 
+            {/* 힌트 텍스트 */}
             <p className="text-xs text-gray-500 text-center">
-              {selectionMode === 'single'
-                ? '탭해서 날짜를 선택하세요 (여러 개 선택 가능)'
-                : '시작일과 종료일을 선택하면 범위가 추가됩니다'}
+              {isDragging
+                ? '종료일을 선택하세요'
+                : '탭하면 선택, 두 번 탭하면 범위 선택'}
             </p>
           </CardContent>
         </Card>
