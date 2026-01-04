@@ -40,17 +40,31 @@ export default function NewRoomPage() {
 
   // 범위 선택
   const handleRangeSelect = (range: DateRange | undefined) => {
+    if (!range) {
+      setDateRange(undefined)
+      return
+    }
+
     setDateRange(range)
-    if (range?.from && range?.to) {
-      const daysInRange = eachDayOfInterval({ start: range.from, end: range.to })
+
+    // from과 to 모두 선택되었을 때만 날짜 추가
+    if (range.from && range.to) {
+      // 범위 내 모든 날짜 가져오기
+      const start = range.from < range.to ? range.from : range.to
+      const end = range.from < range.to ? range.to : range.from
+      const daysInRange = eachDayOfInterval({ start, end })
       const newDates = daysInRange.filter(d => d >= today)
 
       // 기존 선택에 추가 (중복 제거)
       const existingDateStrs = new Set(selectedDates.map(d => format(d, 'yyyy-MM-dd')))
       const uniqueNewDates = newDates.filter(d => !existingDateStrs.has(format(d, 'yyyy-MM-dd')))
 
-      setSelectedDates([...selectedDates, ...uniqueNewDates])
-      setDateRange(undefined) // 범위 초기화
+      if (uniqueNewDates.length > 0) {
+        setSelectedDates(prev => [...prev, ...uniqueNewDates])
+      }
+
+      // 약간의 딜레이 후 범위 초기화 (시각적 피드백을 위해)
+      setTimeout(() => setDateRange(undefined), 300)
     }
   }
 
