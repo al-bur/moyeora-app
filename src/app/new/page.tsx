@@ -38,8 +38,13 @@ export default function NewRoomPage() {
     }
   }
 
-  // 범위 선택
-  const handleRangeSelect = (range: DateRange | undefined) => {
+  // 범위 선택 (react-day-picker v9 시그니처)
+  const handleRangeSelect = (
+    range: DateRange | undefined,
+    _triggerDate: Date,
+  ) => {
+    console.log('Range selected:', range) // 디버깅용
+
     if (!range) {
       setDateRange(undefined)
       return
@@ -262,37 +267,38 @@ export default function NewRoomPage() {
               </div>
             )}
 
-            {/* 캘린더 */}
-            {selectionMode === 'single' ? (
+            {/* 캘린더 - 단일 선택 모드 */}
+            {selectionMode === 'single' && (
               <Calendar
                 mode="single"
                 selected={undefined}
-                onSelect={handleDateSelect}
+                onSelect={(date: Date | undefined) => handleDateSelect(date)}
                 modifiers={{
-                  selected: selectedDates,
+                  alreadySelected: selectedDates,
                 }}
-                modifiersStyles={{
-                  selected: {
-                    backgroundColor: 'rgb(99 102 241)',
-                    color: 'white',
-                  },
+                modifiersClassNames={{
+                  alreadySelected: 'bg-primary text-primary-foreground',
                 }}
                 disabled={{ before: today }}
                 className="rounded-md border mx-auto"
               />
-            ) : (
+            )}
+
+            {/* 캘린더 - 범위 선택 모드 */}
+            {selectionMode === 'range' && (
               <Calendar
                 mode="range"
                 selected={dateRange}
-                onSelect={handleRangeSelect}
+                onSelect={(range, triggerDate) => {
+                  if (triggerDate) {
+                    handleRangeSelect(range, triggerDate)
+                  }
+                }}
                 modifiers={{
                   alreadySelected: selectedDates,
                 }}
-                modifiersStyles={{
-                  alreadySelected: {
-                    backgroundColor: 'rgb(99 102 241)',
-                    color: 'white',
-                  },
+                modifiersClassNames={{
+                  alreadySelected: 'bg-primary/50 text-primary-foreground',
                 }}
                 disabled={{ before: today }}
                 className="rounded-md border mx-auto"
