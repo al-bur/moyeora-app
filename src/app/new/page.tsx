@@ -52,8 +52,16 @@ export default function NewRoomPage() {
 
     setDateRange(range)
 
-    // from과 to 모두 선택되었을 때만 날짜 추가
+    // from과 to가 모두 있고, 서로 다른 날짜일 때만 추가
     if (range.from && range.to) {
+      const fromStr = format(range.from, 'yyyy-MM-dd')
+      const toStr = format(range.to, 'yyyy-MM-dd')
+
+      // 같은 날짜면 아직 범위 선택 중 (첫 번째 클릭)
+      if (fromStr === toStr) {
+        return
+      }
+
       // 범위 내 모든 날짜 가져오기
       const start = range.from < range.to ? range.from : range.to
       const end = range.from < range.to ? range.to : range.from
